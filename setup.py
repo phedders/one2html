@@ -59,7 +59,7 @@ other_resources = []
 
 GUI2Exe_Target_1 = Target(
     # what to build
-    script = "One2HTM.pyw",
+    script = "One2HTM.py",
     icon_resources = icon_resources,
     bitmap_resources = bitmap_resources,
     other_resources = other_resources,
