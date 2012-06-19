@@ -73,7 +73,7 @@ class NotebookIndex(IndexMaker):
     def __init__(self, attribDict):
         self.firstline=u'<title>{name}</title></head><body><h1>{name}</h1>'.format(**attribDict)
         self.firstline+self.firstline+u'<breadcrumb><a href="../index.htm">&lArr; back to notebook list</a></breadcrumb>'
-        self.linetemplate=u'<div style="background: {color}"><a class="divlink" href="{name}.htm">{name}</a></div>\n'
+        self.linetemplate=u'<div style="background: {color}"><a class="divlink" href="{name}.htm">{group}{name}</a></div>\n'
         self.start()
 class SectionIndex(IndexMaker):
     def __init__(self, attribDict):
@@ -261,27 +261,17 @@ class One2HTM:
             if notebook.get('hasChanged') or self.firstscan: #let's look at the sections in this notebook
                 self.master.SetStatusText('Updating...')
                 notebookindex=NotebookIndex(notebook.attrib)
-                for section in [child for child in notebook if child.tag.endswith('Section')]:
-                    notebookindex.add(section.attrib)
-                    self.setChangedFlag(section)
-                    if section.get('hasChanged') or self.firstscan:
-                        sectionindex=SectionIndex(section.attrib)
-                        for page in [child for child in section if child.tag.endswith('Page')]:
-                            page.set('permanentID',self.getPermanentPageID(page.get('ID')))
-                            page.set('color',section.get('color'))
-                            page.set('sectionname',section.get('name'))
-                            if page.get('isSubPage') or page.get('pageLevel')=='2':
-                                page.set('subpageString','class="subpage"')
-                            else:
-                                page.set('subpageString','')
-                            sectionindex.add(page.attrib)
-                            self.setChangedFlag(page)
-                            self.addPageDate(page, notebook)
-                            if page.get('hasChanged'):
-                                self.outputText(notebook.get('name')+'\\'+section.get('name')+'\\'+page.get('name'))
-                                wx.Yield() #refresh the gui
-                                self.exportPage(notebook.get('name'), page)
-                        sectionindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'), section.get('name')+'.htm'))
+                for child in notebook:
+                    if child.tag.endswith('Section'):
+                        child.set('group','')
+                        notebookindex.add(child.attrib)
+                        self.scanSection(child, notebook)
+                    if child.tag.endswith('SectionGroup'):
+                        for section in child: #this only goes 1 level deep, so sub-sub folders will still be missed.
+                            if section.tag.endswith('Section'):
+                                section.set('group',child.get('name')+' &raquo; ')
+                                notebookindex.add(section.attrib)
+                                self.scanSection(section, notebook) 
                 #find the most recently-updated pages
                 notebookindex.insertText(self.getNewPages(notebook))
                 notebookindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'), 'index.htm'))
@@ -292,6 +282,27 @@ class One2HTM:
         self.firstscan=False
         self.master.SetStatusText("Scanning for changes every %s seconds" % self.refreshRate)
         return rootChanged
+
+    def scanSection(self, section, notebook): #run through all the pages in this section
+        self.setChangedFlag(section) 
+        if section.get('hasChanged') or self.firstscan:
+            sectionindex=SectionIndex(section.attrib)
+            for page in [child for child in section if child.tag.endswith('Page')]:
+                page.set('permanentID',self.getPermanentPageID(page.get('ID')))
+                page.set('color',section.get('color'))
+                page.set('sectionname',section.get('name'))
+                if page.get('isSubPage') or page.get('pageLevel')=='2':
+                    page.set('subpageString','class="subpage"')
+                else:
+                    page.set('subpageString','')
+                sectionindex.add(page.attrib)
+                self.setChangedFlag(page)
+                self.addPageDate(page, notebook)
+                if page.get('hasChanged'):
+                    self.outputText(notebook.get('name')+'\\'+section.get('name')+'\\'+page.get('name'))
+                    wx.Yield() #refresh the gui
+                    self.exportPage(notebook.get('name'), page)
+            sectionindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'), section.get('name')+'.htm'))
 
     def exportPage(self, notebookname, page):
         ## converts a onenote page into a set of HTML pages ##
