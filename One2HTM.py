@@ -26,6 +26,8 @@ import ConfigParser
 from time import sleep
 from operator import itemgetter
 
+from pprint import pprint
+
 onapp = win32com.client.Dispatch( 'OneNote.Application')
 
 ### HTML generation routines (most of them) ###
@@ -33,8 +35,8 @@ onapp = win32com.client.Dispatch( 'OneNote.Application')
 #CSS style for index pages
 commonheader="""<html><head><meta name="viewport" content="width = device-width"><style>
 body { font-family:Calibri; margin:0px; padding:8px;}
-div {padding: 4px; line-height: 24pt; max-width: 400px; border-top: solid grey thin; font-size: large;}
-div.subpage { margin-left: 30px; max-width: 370px; font-size:medium;}
+div {padding: 4px; line-height: 24pt; max-width: 1000; border-top: solid grey thin; font-size: large;}
+div.subpage { margin-left: 30px; max-width: 970px; font-size:medium;}
 a { text-decoration: none; color: black;}
 a:hover{ text-decoration: underline overline;}
 a.divlink {display:block;}
@@ -73,13 +75,19 @@ class NotebookIndex(IndexMaker):
     def __init__(self, attribDict):
         self.firstline=u'<title>{name}</title></head><body><h1>{name}</h1>'.format(**attribDict)
         self.firstline+self.firstline+u'<breadcrumb><a href="../index.htm">&lArr; back to notebook list</a></breadcrumb>'
-        self.linetemplate=u'<div style="background: {color}"><a class="divlink" href="{name}.htm">{group}{name}</a></div>\n'
+        self.linetemplate=u'<div style="background: {color}"><a class="divlink" href="{subPath}">{subPath}</a></div>\n'
+        self.start()
+class SectionGroupIndex(IndexMaker):
+    def __init__(self, attribDict):
+        self.firstline=u'<title>{name}</title></head><body style="border-left: solid {color} 10px;"><h1>{name}</h1>'.format(**attribDict)
+        self.firstline+self.firstline+u'<breadcrumb><a href="index.htm">&lArr; back to section list</a></breadcrumb>'
+        self.linetemplate=u'<div {subpageString}><a class="divlink" href={permanentID}/index.htm>{name}</a></div>'
         self.start()
 class SectionIndex(IndexMaker):
     def __init__(self, attribDict):
         self.firstline=u'<title>{name}</title></head><body style="border-left: solid {color} 10px;"><h1>{name}</h1>'.format(**attribDict)
         self.firstline+self.firstline+u'<breadcrumb><a href="index.htm">&lArr; back to section list</a></breadcrumb>'
-        self.linetemplate=u'<div {subpageString}><a class="divlink" href={permanentID}/index.htm>{name}</a></div>'
+        self.linetemplate=u'<div {subpageString}><a class="divlink" href=pages/{permanentID}/index.htm>{name}</a></div>'
         self.start()
 
 ### end of HTML routines ###
@@ -156,6 +164,7 @@ class One2HTM:
         if self.counter>self.refreshRate:
             self.counter=0
             self.scan()
+            self.outputText("scan complete - resetting timer.")
         self.master.timer.Start(1000, oneShot=True)
 
     def DoConfig(self):
@@ -228,7 +237,7 @@ class One2HTM:
         ##generates the recently-changed-page list
         newpagelist='<br><h1>Recent pages</h1>\n'
         for page in self.recentpages.get(notebook.get('name'),[]):
-            newpagelist=newpagelist+'<div style="background: %(color)s" ><a class="divlink" href=%(permanentID)s/index.htm>%(sectionname)s &raquo;<br> %(name)s</a></div>\n' % page
+            newpagelist=newpagelist+'<div style="background: %(color)s" ><a class="divlink" href=pages/%(permanentID)s/index.htm>%(sectionname)s &raquo;<br> %(name)s</a></div>\n' % page
         return newpagelist 
 
     def addPageDate(self, page, notebook):
@@ -262,16 +271,14 @@ class One2HTM:
                 self.master.SetStatusText('Updating...')
                 notebookindex=NotebookIndex(notebook.attrib)
                 for child in notebook:
+                    child.set('subPath',re.sub(r'\.one$',r'.htm',re.sub(r'\\',r'...',child.get('path').replace(notebook.get('path'),'').lstrip(r'\\'))))
+                    child.set('subName',re.sub(r'/',r'&raquo;',child.get('subPath')))
                     if child.tag.endswith('Section'):
                         child.set('group','')
                         notebookindex.add(child.attrib)
                         self.scanSection(child, notebook)
                     if child.tag.endswith('SectionGroup'):
-                        for section in child: #this only goes 1 level deep, so sub-sub folders will still be missed.
-                            if section.tag.endswith('Section'):
-                                section.set('group',child.get('name')+' &raquo; ')
-                                notebookindex.add(section.attrib)
-                                self.scanSection(section, notebook) 
+                        self.scanSectionGroup(child,notebook,notebookindex)
                 #find the most recently-updated pages
                 notebookindex.insertText(self.getNewPages(notebook))
                 notebookindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'), 'index.htm'))
@@ -282,6 +289,20 @@ class One2HTM:
         self.firstscan=False
         self.master.SetStatusText("Scanning for changes every %s seconds" % self.refreshRate)
         return rootChanged
+
+    def scanSectionGroup(self, sectionGroup, notebook, notebookindex): #run through everything in this sectionGroup
+        #sectionGroup.set('subPath',sectionGroup.get('subPath').strip(r'\\') )
+        #pprint(sectionGroup.attrib)
+        for child in sectionGroup: 
+            child.set('subPath',re.sub(r'\.one$',r'.htm',re.sub(r'\\',r'...',child.get('path').replace(notebook.get('path'),'').lstrip(r'\\'))))
+            child.set('subName',re.sub(r'/',r'&raquo;',child.get('subPath')))
+            #self.outputText(':%s ' % child.get('name'))
+            if child.tag.endswith('SectionGroup'):
+                self.scanSectionGroup(child,notebook, notebookindex)
+            if child.tag.endswith('Section'):
+                child.set('group',child.get('name')+' &raquo; ')
+                notebookindex.add(child.attrib)
+                self.scanSection(child, notebook) 
 
     def scanSection(self, section, notebook): #run through all the pages in this section
         self.setChangedFlag(section) 
@@ -302,19 +323,23 @@ class One2HTM:
                     self.outputText(notebook.get('name')+'\\'+section.get('name')+'\\'+page.get('name'))
                     wx.Yield() #refresh the gui
                     self.exportPage(notebook.get('name'), page)
-            sectionindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'), section.get('name')+'.htm'))
+            sectionindex.writeFile(os.path.join(self.rootFolder, notebook.get('name'),  section.get('subPath')))
 
     def exportPage(self, notebookname, page):
         ## converts a onenote page into a set of HTML pages ##
         #first, some sub-functions
         def writeHTML(text):
+            pprint(page.attrib)
             ##this function saves the HTML file
             #insert custom CSS
             text=text.replace('<head>','<head><title>'+page.get('name').encode('utf-8')+'</title>'+customcss)
             #remove unnecessary left margins
             text=re.sub(r'margin-left:[-.\d]*in;','',text)
             #replaces onenote hyperlinks with ones to the correct web page
-            text=re.sub(r'href=.*section-id=([\w\{\}-]*)&amp;page-id=([\w\{\}-]*).*">',r'href="../\2/index.htm">',text)
+            text=re.sub(r'href=.*section-id=([\w\{\}-]*)&amp;page-id=([\w\{\}-]*).*">',r'href="../../\2/index.htm">',text)
+            text=re.sub(r'href="onenote:([^#]+)\.one#.*">',r'href="../\1.htm">',text)
+            text=re.sub(r'href="onenote:([^#]+)#.*">',r'href="../\1.htm">',text)
+            text=re.sub(r'href="\.\.\/\.\.\/([^"]+)\\',r'href="../../\1...',text)
             if not os.path.isdir(destinationfolder):
                 os.makedirs(destinationfolder)
             outfilename=os.path.join(destinationfolder,'index.htm')
@@ -335,7 +360,7 @@ class One2HTM:
         if os.path.isfile(mhtfilename): # any existing file must be removed, otherwise an exception occurs
             os.remove(mhtfilename)
         onapp.Publish(page.get('ID'),mhtfilename,2,'') #this makes the MHT file
-        destinationfolder=os.path.join(self.rootFolder, notebookname, page.get('permanentID'))
+        destinationfolder=os.path.join(self.rootFolder, notebookname, 'pages', page.get('permanentID'))
         #now convert the MHT file into HTML and write to the destination:        
         fp=open(mhtfilename)
         try:
